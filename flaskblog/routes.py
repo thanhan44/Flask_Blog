@@ -1,30 +1,31 @@
 import os
 import secrets
 from PIL import Image #pillow
-from flask import render_template, url_for, flash, redirect, request
+from flask import render_template, url_for, flash, redirect, request, abort
 from flaskblog import app, db, bcrypt
-from flaskblog.forms import RegistrationForm, LoginForm, UpdateAccountForm
+from flaskblog.forms import RegistrationForm, LoginForm, UpdateAccountForm, PostForm
 from flaskblog.models import User, Post
 from flask_login import login_user, current_user, logout_user, login_required
 
-posts = [
-    {
-        'author': 'Corey Schafer',
-        'title': 'Blog Post 1',
-        'content': 'First post content',
-        'date_posted': 'April 20, 2018'
-    },
-    {
-        'author': 'Jane Doe',
-        'title': 'Blog Post 2',
-        'content': 'Second post content',
-        'date_posted': 'April 21, 2018'
-    }
-]
+# posts = [
+#     {
+#         'author': 'Corey Schafer',
+#         'title': 'Blog Post 1',
+#         'content': 'First post content',
+#         'date_posted': 'April 20, 2018'
+#     },
+#     {
+#         'author': 'Jane Doe',
+#         'title': 'Blog Post 2',
+#         'content': 'Second post content',
+#         'date_posted': 'April 21, 2018'
+#     }
+# ]
 
 @app.route("/")
 @app.route("/home")
 def home():
+    posts = Post.query.all()
     return render_template('home.html', posts=posts)
 
 
@@ -32,6 +33,10 @@ def home():
 def about():
     return render_template('about.html', title='About')
 
+
+###############################################################
+# Register, login, logout, account for user
+###############################################################
 @app.route("/register", methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated:
@@ -82,9 +87,9 @@ def save_picture(form_picture):
     i.save(picture_path)
 
     # remove previous profile picture (option)
-    # prev_picture = os.path.join(app.root_path, 'static/profile_pics', current_user.image_file)
-    # if os.path.exists(prev_picture) and os.path.basename(prev_picture) != 'default.jpg':
-    #     os.remove(prev_picture)
+    prev_picture = os.path.join(app.root_path, 'static/profile_pics', current_user.image_file)
+    if os.path.exists(prev_picture) and os.path.basename(prev_picture) != 'default.jpg':
+        os.remove(prev_picture)
 
     return picture_fn
 
@@ -108,3 +113,59 @@ def account():
 
     image_file = url_for('static', filename='profile_pics/' + current_user.image_file)
     return render_template('account.html', title='Account', image_file=image_file, form=form)
+
+
+###############################################################
+# Create new post, post in web, update and remove posts
+###############################################################
+@app.route("/post/new", methods=['GET', 'POST'])
+@login_required
+def new_post():
+    form = PostForm()
+    if form.validate_on_submit():
+        post = Post(title=form.title.data, content=form.content.data, author=current_user)
+        db.session.add(post)
+        db.session.commit()
+        flash('Your post has been created!', 'success')
+        return redirect(url_for('home'))
+    return render_template('create_post.html', title='New Post',
+                           form=form, legend='New Post')
+
+
+
+@app.route("/post/<int:post_id>",  methods=['GET'])
+def post(post_id):
+    post = Post.query.get_or_404(post_id)
+    return render_template('post.html', title=post.title, post=post)
+
+
+
+@app.route("/post/<int:post_id>/update", methods=['GET', 'POST'])
+@login_required
+def update_post(post_id):
+    post = Post.query.get_or_404(post_id)
+    if post.author != current_user:
+        abort(403)
+    form = PostForm()
+    if form.validate_on_submit():
+        post.title = form.title.data
+        post.content = form.content.data
+        db.session.commit()
+        flash('Your post has been updated!', 'success')
+        return redirect(url_for('post', post_id=post.id))
+    elif request.method == 'GET':
+        form.title.data = post.title
+        form.content.data = post.content
+    return render_template('create_post.html', title='Update Post',
+                           form=form, legend='Update Post')
+
+@app.route("/post/<int:post_id>/delete", methods=['POST'])
+@login_required
+def delete_post(post_id):
+    post = Post.query.get_or_404(post_id)
+    if post.author != current_user:
+        abort(403)
+    db.session.delete(post)
+    db.session.commit()
+    flash('Your post has been deleted!', 'success')
+    return redirect(url_for('home'))
